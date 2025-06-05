@@ -1,27 +1,144 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Finger Calculator</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Finger-Tracked Calculator</title>
   <style>
-    canvas {
-      border: 1px solid black;
-    }
-    #calc {
-      position: absolute;
-      top: 0;
-      left: 0;
-    }
+    body { margin: 0; overflow: hidden; background-color: #000; }
+    canvas { display: block; }
   </style>
 </head>
 <body>
-  <video id="video" autoplay playsinline style="display:none;"></video>
-  <canvas id="calc" width="640" height="480"></canvas>
-
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <video id="video" style="display:none;" autoplay playsinline></video>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <script src="app.js"></script>
+
+  <script>
+    // Setup Three.js
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Lighting
+    const light = new THREE.AmbientLight(0xffffff, 1);
+    scene.add(light);
+
+    // Calculator logic
+    let input = '';
+
+    // Create 3D Buttons
+    const buttons = [];
+    const labels = [
+      '7', '8', '9', '/',
+      '4', '5', '6', '*',
+      '1', '2', '3', '-',
+      '0', 'C', '=', '+'
+    ];
+
+    const buttonGeometry = new THREE.BoxGeometry(0.4, 0.4, 0.1);
+    const buttonMaterial = new THREE.MeshStandardMaterial({ color: 0x2222ff });
+
+    labels.forEach((label, i) => {
+      const button = new THREE.Mesh(buttonGeometry, buttonMaterial.clone());
+      button.position.x = (i % 4 - 1.5) * 0.6;
+      button.position.y = (-Math.floor(i / 4) + 1.5) * 0.6;
+      button.position.z = -2;
+      button.userData.label = label;
+      buttons.push(button);
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = canvas.height = 64;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '48px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 32, 32);
+      const texture = new THREE.CanvasTexture(canvas);
+
+      const labelMat = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+      const labelMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), labelMat);
+      labelMesh.position.copy(button.position);
+      labelMesh.position.z -= 0.06;
+      scene.add(labelMesh);
+
+      scene.add(button);
+    });
+
+    // MediaPipe Hands Setup
+    const video = document.getElementById('video');
+    const hands = new Hands({
+      locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+
+    let lastPressed = '';
+    const debounceTime = 600; // ms
+    let lastTime = 0;
+
+    hands.onResults(results => {
+      if (results.multiHandLandmarks.length > 0) {
+        const index = results.multiHandLandmarks[0][8];
+        const x = (index.x - 0.5) * 2;
+        const y = -(index.y - 0.5) * 2;
+        const z = -index.z * 2;
+
+        const finger = new THREE.Vector3(x, y, z);
+
+        buttons.forEach(button => {
+          if (finger.distanceTo(button.position) < 0.25) {
+            const now = Date.now();
+            if (button.userData.label !== lastPressed || now - lastTime > debounceTime) {
+              lastPressed = button.userData.label;
+              lastTime = now;
+              handleInput(button.userData.label);
+              button.material.color.set(0xff0000);
+              setTimeout(() => button.material.color.set(0x2222ff), 300);
+            }
+          }
+        });
+      }
+    });
+
+    const cam = new Camera(video, {
+      onFrame: async () => await hands.send({ image: video }),
+      width: 640,
+      height: 480
+    });
+    cam.start();
+
+    camera.position.z = 1;
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    function handleInput(key) {
+      if (key === 'C') {
+        input = '';
+      } else if (key === '=') {
+        try {
+          input = eval(input).toString();
+        } catch {
+          input = 'Err';
+        }
+      } else {
+        input += key;
+      }
+      console.log(input);
+    }
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
 </body>
 </html>
